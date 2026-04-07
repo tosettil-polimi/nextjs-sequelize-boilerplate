@@ -1,12 +1,12 @@
-# Next.js + Mongoose Boilerplate
+# Next.js + Sequelize Boilerplate
 
-A modern, production-ready boilerplate for building full-stack applications with **Next.js 16**, **React 19**, **MongoDB/Mongoose**, and **TypeScript**.
+A modern, production-ready boilerplate for building full-stack applications with **Next.js 16**, **React 19**, **PostgreSQL/Sequelize**, and **TypeScript**.
 
 ## ✨ Features
 
 - 🚀 **Next.js 16** with App Router and React Server Components
 - ⚛️ **React 19** with latest features (use(), useActionState, etc.)
-- 📦 **MongoDB/Mongoose** for database management
+- 🐘 **PostgreSQL + Sequelize v6** for database management
 - 🔐 **JWT Authentication** with secure session management
 - 🔑 **Password Reset** flow with email verification
 - 🌍 **i18n** Multi-language support (EN/IT out of the box)
@@ -22,7 +22,7 @@ A modern, production-ready boilerplate for building full-stack applications with
 ### Prerequisites
 
 - [Bun](https://bun.sh/) (recommended) or Node.js 20+
-- MongoDB instance (local or cloud)
+- PostgreSQL instance (local or cloud)
 
 ### Installation
 
@@ -33,13 +33,13 @@ git clone https://github.com/your-username/your-app.git
 cd your-app
 ```
 
-1. **Install dependencies**
+2. **Install dependencies**
 
 ```bash
 bun install
 ```
 
-1. **Set up environment variables**
+3. **Set up environment variables**
 
 Create a `.env.local` file in the root directory:
 
@@ -51,11 +51,11 @@ NEXT_PUBLIC_APP_URL="http://localhost:3000"
 # You can override it if needed. See: https://nextjs.org/docs/app/building-your-application/configuring/environment-variables
 NODE_ENV="development"
 
-# MongoDB Connection
-MONGODB_URI="mongodb://localhost:27017/myapp"
+# PostgreSQL Connection
+DATABASE_URL="postgresql://user:password@localhost:5432/myapp"
 
-# JWT Secret (generate with: openssl rand -base64 32)
-JWT_SECRET="your-super-secret-jwt-key-change-in-production"
+# Session Secret (generate with: openssl rand -base64 32)
+SESSION_SECRET="your-super-secret-session-key-change-in-production"
 
 # SMTP Configuration (for password reset emails)
 SMTP_HOST="smtp.example.com"
@@ -73,13 +73,15 @@ SENTRY_PROJECT=""
 SENTRY_AUTH_TOKEN=""
 ```
 
-1. **Run the development server**
+4. **Run the development server**
 
 ```bash
 bun dev
 ```
 
-1. **Open [http://localhost:3000](http://localhost:3000)**
+The database tables are created/updated automatically on startup in development (`sequelize.sync({ alter: true })`). For production, use migrations (see [Migrations](#-migrations)).
+
+5. **Open [http://localhost:3000](http://localhost:3000)**
 
 ## 📁 Project Structure
 
@@ -96,16 +98,55 @@ bun dev
 │   └── logo.tsx                # App logo component (customize this!)
 ├── lib/
 │   ├── auth.ts                 # Authentication utilities
-│   ├── mongodb.ts              # MongoDB connection
+│   ├── database.ts             # Sequelize singleton connection
 │   ├── session.ts              # Session management
 │   ├── mailer.ts               # Email utilities
 │   └── i18n/                   # Internationalization utilities
 ├── models/
 │   ├── User.ts                 # User model
 │   ├── PasswordResetToken.ts   # Password reset token model
+│   ├── index.ts                # Model registry + dbConnect()
 │   └── enums/                  # TypeScript enums
 └── templates/
     └── email/                  # Email templates
+```
+
+## 🗄️ Database
+
+### Connection
+
+The Sequelize instance is a singleton defined in `lib/database.ts` and reads the `DATABASE_URL` environment variable. It is connected once at startup via `instrumentation.ts`.
+
+### Migrations
+
+In **development**, `sequelize.sync({ alter: true })` keeps the schema in sync automatically.
+
+In **production**, use `sequelize-cli` migrations:
+
+```bash
+bun add -d sequelize-cli
+bunx sequelize-cli migration:generate --name create-users
+bunx sequelize-cli db:migrate
+bunx sequelize-cli db:migrate:undo
+```
+
+### Transactions
+
+Always use unmanaged transactions for operations that must succeed or fail together:
+
+```typescript
+import sequelize from '@/lib/database';
+
+const t = await sequelize.transaction();
+try {
+  await PasswordResetToken.destroy({ where: { userId }, transaction: t });
+  await PasswordResetToken.create({ userId, token, expiresAt }, { transaction: t });
+  await t.commit();
+  // side effects (email, etc.) after commit
+} catch (error) {
+  await t.rollback();
+  throw error;
+}
 ```
 
 ## 🎨 Customization
@@ -120,32 +161,53 @@ bun dev
 --color-brand-dark: #your-dark-color;
 ```
 
-1. **Metadata**: Update `app/[lang]/layout.tsx` with your app name and description
-2. **Email Templates**: Customize templates in `templates/email/`
+3. **Metadata**: Update `app/[lang]/layout.tsx` with your app name and description
+4. **Email Templates**: Customize templates in `templates/email/`
 
 ### Adding Languages
 
 1. Create a new dictionary file in `app/[lang]/dictionaries/` (e.g., `fr.json`)
 2. Add the language to `models/enums/Language.ts`
-3. Update `SUPPORTED_LANGUAGES` array
+3. Update the `SUPPORTED_LANGUAGES` array
 
 ### Adding Models
 
-Create new Mongoose models in the `models/` directory:
+Create new Sequelize models in the `models/` directory:
 
 ```typescript
-import mongoose, { Schema, Document, Model } from 'mongoose';
+import { Model, DataTypes } from 'sequelize';
+import sequelize from '@/lib/database';
 
-export interface IYourModel extends Document {
+export interface IYourModel {
+  id: string;
   // your fields
 }
 
-const YourModelSchema = new Schema<IYourModel>({
-  // your schema
-}, { timestamps: true });
+class YourModel extends Model<IYourModel> implements IYourModel {
+  declare id: string;
+  // your fields
+}
 
-export default mongoose.models.YourModel || mongoose.model('YourModel', YourModelSchema);
+YourModel.init(
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+    // your fields
+  },
+  {
+    sequelize,
+    tableName: 'your_models',
+    timestamps: true,
+  }
+);
+
+export default YourModel;
 ```
+
+Then import the model in `models/index.ts` to register it with the Sequelize instance and export it.
 
 ## 🐳 Docker
 
@@ -166,17 +228,21 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - MONGODB_URI=mongodb://mongo:27017/myapp
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/myapp
     depends_on:
-      - mongo
+      - db
 
-  mongo:
-    image: mongo:7
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: myapp
     volumes:
-      - mongo_data:/data/db
+      - pg_data:/var/lib/postgresql/data
 
 volumes:
-  mongo_data:
+  pg_data:
 ```
 
 ## 🚀 Deployment
@@ -219,8 +285,8 @@ The GitHub Actions workflow will automatically build and push Docker images to G
 | Next.js | 16 | React framework |
 | React | 19 | UI library |
 | TypeScript | 5 | Type safety |
-| MongoDB | - | Database |
-| Mongoose | 9 | ODM |
+| PostgreSQL | 16 | Database |
+| Sequelize | 6 | ORM |
 | Tailwind CSS | 4 | Styling |
 | shadcn/ui | - | UI components |
 | Sentry | 10 | Error tracking |
