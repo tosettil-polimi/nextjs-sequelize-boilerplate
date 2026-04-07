@@ -1,0 +1,13 @@
+node_modules
+.next
+out
+build
+dist
+pnpm-lock.yaml
+coverage
+.turbo
+*.min.js
+*.min.css
+public
+.contentlayer
+next-env.d.ts

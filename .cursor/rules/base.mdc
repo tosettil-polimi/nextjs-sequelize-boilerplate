@@ -1,0 +1,121 @@
+---
+alwaysApply: true
+---
+
+## Project Stack
+- **Framework**: Next.js 16
+- **React**: React 19
+- **TypeScript**: Strict mode enabled
+- **UI Components**: shadcn/ui
+- **Styling**: Tailwind CSS
+- **ORM**: Sequelize v6 (PostgreSQL via `pg`)
+- **Database**: PostgreSQL — connection string via `DATABASE_URL` env variable
+
+## MCP Servers Available
+- **shadcn/ui MCP**: Component scaffolding and management
+- **Next.js MCP**: Next.js-specific operations and utilities
+
+---
+
+## Code Style & Conventions
+
+### TypeScript
+- Use strict TypeScript configuration
+- Use explicit return types for functions
+- Leverage TypeScript's type inference where obvious
+- Use `const` assertions for immutable data structures
+
+### React 19 Specific
+- Use React Server Components (RSC) by default
+- Add `'use client'` directive only when necessary (interactivity, hooks, browser APIs)
+- Leverage React 19's built-in features: `use()` hook, Server Actions, improved hydration
+- Use `useActionState` for form handling with Server Actions
+- Prefer Server Components for data fetching
+
+### Next.js 16 App Router
+- Use App Router structure (`app/` directory)
+- File-based routing: `page.tsx`, `layout.tsx`, `loading.tsx`, `error.tsx`, `not-found.tsx`
+- Leverage Route Groups `(group-name)` for organization without affecting URL structure
+- Implement proper loading and error boundaries
+
+### shadcn/ui Usage
+- Use shadcn/ui MCP for adding/updating components
+- Import components from `@/components/ui/`
+- Customize components in place rather than wrapping
+- Follow shadcn/ui naming conventions
+- Leverage Tailwind utility classes for styling
+
+### Data Fetching
+- Prefer Server Components for data fetching
+- Use `fetch` with Next.js automatic caching
+- Implement proper error handling with try-catch
+- Use `revalidatePath` and `revalidateTag` for cache invalidation
+- For client-side data fetching, use SWR or React Query
+
+### Sequelize & Database
+- Sequelize singleton lives in `lib/database.ts`; never instantiate `Sequelize` elsewhere
+- Models live in `models/` and extend Sequelize's `Model` class
+- The `defaultScope` on `User` excludes `password`; use `User.scope('withPassword')` when the hash is needed (e.g. credential verification, password change)
+- `dbConnect()` exported from `models/index.ts` must be called once at startup (already wired in `instrumentation.ts`)
+- Use `sequelize.sync({ alter: true })` in development; use proper migrations (e.g. `sequelize-cli`) in production
+- Import `Op` from `sequelize` for query operators (e.g. `Op.gt`, `Op.like`)
+- Handle `UniqueConstraintError` from `sequelize` instead of MongoDB's error code 11000
+
+### Sequelize Transactions
+- Always use **unmanaged transactions** — they give explicit control over commit/rollback and make the flow easier to reason about in Server Actions
+- Start a transaction with `await sequelize.transaction()`, always wrap in try/catch/finally, commit in try and rollback in catch
+- Pass `{ transaction: t }` to **every** Sequelize operation (`findOne`, `create`, `update`, `destroy`, `save`, etc.) — omitting it runs the operation outside the transaction
+- Group operations that must succeed or fail together inside a single transaction (e.g. deleting old tokens and creating a new one)
+- Perform side effects with external services (email, HTTP calls) **after** `await t.commit()`, never before
+- Keep transactions short: no long-running async work or network calls between `transaction()` and `commit()` to minimise lock contention
+- Import `sequelize` from `@/lib/database` to start transactions
+
+**Standard pattern:**
+```ts
+import sequelize from '@/lib/database';
+
+const t = await sequelize.transaction();
+try {
+  await PasswordResetToken.destroy({ where: { userId }, transaction: t });
+  const token = await PasswordResetToken.create({ userId, token, expiresAt }, { transaction: t });
+  await t.commit();
+  // side effects after commit
+  await sendEmail(token);
+} catch (error) {
+  await t.rollback();
+  throw error;
+}
+```
+
+### Styling Guidelines
+- Use Tailwind CSS utility classes
+- Use CSS variables for theming (defined in globals.css)
+- Prefer composition over custom CSS
+- Use `cn()` utility from `lib/utils` for conditional classes
+
+---
+
+## MCP Usage Guidelines
+
+### Using shadcn/ui MCP
+When adding UI components, prefer using the MCP to:
+- Add new shadcn/ui components to the project
+- Update existing components
+- Check component documentation
+- Ensure consistent component patterns
+
+### Using Next.js MCP
+Leverage the Next.js MCP for:
+- Next.js-specific configurations
+- Route generation and management
+- Build and deployment operations
+- Next.js best practices guidance
+
+---
+
+## Notes
+- Always consider whether a component needs to be a Client Component
+- Prefer composition and small, focused components
+- Use TypeScript's type system to catch errors early
+- Document complex logic with comments
+- Follow Next.js 16 and React 19 best practices
